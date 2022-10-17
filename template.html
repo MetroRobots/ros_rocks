@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>ros.rocks - Multidistro buildfarm status</title>
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.12.1/css/jquery.dataTables.min.css">
+    <link href="https://fonts.googleapis.com/css?family=Overpass" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css?family=Raleway" rel="stylesheet">
+    <script type="text/javascript" src="https://code.jquery.com/jquery-3.5.1.js"></script>
+    <script src="https://cdn.datatables.net/1.12.1/js/jquery.dataTables.min.js" ></script>
+    <script src="https://cdn.datatables.net/responsive/2.3.0/js/dataTables.responsive.min.js"></script>
+    <script src="https://cdn.datatables.net/fixedheader/3.2.4/js/dataTables.fixedHeader.min.js"></script>
+<style>
+body {
+    font-family: 'Raleway', serif;
+}
+thead {
+    background-color: #fff;
+}
+th, .pkg_name {
+    font-family: 'Overpass', sans-serif;
+}
+.repos, .maint {
+    font-size: 10pt;
+}
+.repos > a {
+    display: block;
+}
+.maint > a {
+    display: block;
+}
+.squares {
+    border: 1px solid gray;
+    display: inline-block;
+    height: 15px;
+    width: 15px;
+    text-align: center;
+    line-height: 1.1;
+    text-decoration: none;
+}
+.good {
+    background-color: #a2d39c;
+}
+.rerelease {
+    background-color: #7ea7d8;
+}
+.new {
+    background-color: #bddbff;
+}
+.multiple {
+    background-color: #f0ac78;
+}
+.complicated {
+    background-color: #f0f078;
+}
+.bad {
+    background-color: #f07878;
+}
+/* Hide hidden text. */
+.ht {
+    display: none;
+}
+.se-pre-con {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 9999;
+    background: #fff;
+}
+
+.cssload-container {
+    margin: 49px auto;
+    width: 97px;
+    top: 30%;
+    position: relative;
+}
+.spinner {
+  font-size: 100pt;
+  animation: spinner 5s linear infinite;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* Animation styles */
+@keyframes spinner {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+</style>
+</head>
+<div class="se-pre-con">
+    <div class="cssload-container">
+        <span class="spinner">🤖</span>
+    </div>
+</div>
+<table id="status_table" class="display">
+    <thead>
+        <tr>
+            <th>Package
+            <th title="Repo locations over all distros">Repo
+            <th title="Maintainers over all distros">Maintainers
+        {%- for distro in distros %}
+            <th title="{{distro}}">{{distro[0]|upper}}
+        {%- endfor %}
+            <th title="# of ROS 1 distros">1
+            <th title="# of ROS 2 distros">2
+            <th title="# of ROS distros (all)">*
+        </tr>
+    </thead>
+    {%- for pkg, info in data.items() %}
+    <tr><td class="pkg_name">{{pkg}}
+        <td class="repos">{% for repo in info['repo'] %}
+            <a href="{{repo['url']}}">{{repo['name']}}</a>
+            {%- endfor %}
+        <td class="maint">{% for maintainer in info['maintainers'] %}
+            <a href="mailto:{{maintainer['email']}}">{{maintainer['name']}}</a>
+            <span class="ht">{{maintainer['email']}}</span>
+            {%- endfor -%}
+        {%- for distro in distros %}
+        <td>{% if distro in info['status'] -%}
+            <span class="squares {{info['status'][distro]['class']}}" title="{{info['status'][distro]['version']}} &#010;{{info['status'][distro]['status']}}"></span>
+            {%- endif -%}
+        {%- endfor %}
+        <td>{{ info['ros1'] }}
+        <td>{{ info['ros2'] }}
+        <td>{{ info['status']|length }}
+    {%- endfor %}
+</table>
+
+Last Updated: <script>
+        var time_utc = new Date({{now * 1000}});
+        document.write(time_utc.toLocaleString());
+        var searchParams = new URLSearchParams(window.location.search);
+
+        $(document).ready( function () {
+            var table = $('#status_table').DataTable({
+                responsive: true,
+                paging: false,
+                'oSearch': {
+                    "sSearch": searchParams.get('q') || ''
+                }
+            });
+            new $.fn.dataTable.FixedHeader(table);
+            $(".se-pre-con").fadeOut(1400);
+        } );
+</script>
+
+<br />
+<img src="rocks.jpg" alt="a picture of rocks from the excellent film Everything Everywhere All At Once" width="100%"/>
+</html>
