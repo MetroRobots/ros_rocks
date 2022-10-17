@@ -46,13 +46,14 @@ def get_status_yamls():
     return yaml_dict
 
 
-def download_yamls(cache_folder):
+def download_yamls(cache_folder, debug=True):
     now = datetime.datetime.now()
     for filename, (full_url, dt) in get_status_yamls().items():
         target_path = cache_folder / filename
         if target_path.exists() and now - dt > datetime.timedelta(days=2):
             continue
-        click.secho(f'Downloading {filename}...', fg='cyan')
+        if debug:
+            click.secho(f'Downloading {filename}...', fg='cyan')
         req = requests.get(full_url)
         with open(target_path, 'w') as f:
             f.write(req.content.decode())
