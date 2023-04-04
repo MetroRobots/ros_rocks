@@ -110,7 +110,7 @@ th, .pkg_name {
             <th title="# of ROS distros (all)">*
         </tr>
     </thead>
-    {%- for pkg, info in data.items() %}
+    {%- for pkg, info in data %}
     <tr><td class="pkg_name">{{pkg}}
         <td class="repos">{% for repo in info['repo'] %}
             <a href="{{repo['url']}}">{{repo['name']}}</a>

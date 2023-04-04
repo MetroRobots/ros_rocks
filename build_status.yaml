@@ -1,0 +1,40 @@
+tables:
+  updates:
+  - key
+  - mod_time
+  pkg:
+  - id
+  - name
+  person:
+  - id
+  - name
+  - email
+  maintainer:
+  - pkg_id
+  - person_id
+  repo:
+  - id
+  - name
+  - url
+  pkg_repo:
+  - pkg_id
+  - repo_id
+  build_type:
+  - id
+  - os_name
+  - os_code_name
+  - arch
+  - release
+  status:
+  - pkg_id
+  - distro
+  - build_type_id
+  - binary_name
+default_type: str
+types:
+  id: int
+  mod_time: int
+  pkg_id: int
+  person_id: int
+  repo_id: int
+  build_type_id: int

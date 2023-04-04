@@ -2,16 +2,17 @@
 
 import argparse
 import click
+from metro_db import MetroDB
 import pathlib
 import yaml
-from ros_rocks import download_yamls, get_distro_dicts, get_status, ROS1, get_all_distros
+from ros_rocks import download_yamls, read_distro_dicts, get_package_statuses, ROS1, get_all_distros
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-d', '--download', action='store_true')
-    parser.add_argument('-r', '--reparse', action='store_true')
     parser.add_argument('-s', '--statuses', action='store_true')
+    parser.add_argument('-w', '--write', action='store_true')
     args = parser.parse_args()
 
     folder = pathlib.Path('the_yamls')
@@ -19,43 +20,44 @@ if __name__ == '__main__':
     if args.download:
         download_yamls(folder)
 
-    cached_distro_dicts_path = pathlib.Path('distro_dicts.yaml')
-    if not cached_distro_dicts_path.exists() or args.reparse:
-        distro_dicts = get_distro_dicts(folder)
-        yaml.safe_dump(distro_dicts, open(cached_distro_dicts_path, 'w'), default_flow_style=False)
-    else:
-        distro_dicts = yaml.safe_load(open(cached_distro_dicts_path))
+    full_status = {}
 
-    status_dict = get_status(distro_dicts)
-    yaml.safe_dump(status_dict, open('status.yaml', 'w'))
+    with MetroDB('build_status') as db:
+        read_distro_dicts(db, folder)
 
-    longest_package_name_length = max(len(pkg) for pkg in status_dict)
-    f_s = '{:' + str(longest_package_name_length + 2) + '}'
+        longest_package_name_length = len(db.lookup('name', 'pkg', 'ORDER BY LENGTH(name) DESC'))
+        f_s = '{:' + str(longest_package_name_length + 2) + '}'
 
-    distros = get_all_distros(status_dict)
+        distros = get_all_distros(db)
 
-    for pkg in sorted(status_dict):
-        click.secho(f_s.format(pkg), nl=False)
-        one = True
-        for distro in distros:
-            if one and distro not in ROS1:
-                one = False
-                click.secho(' ', nl=False)
-            letter = distro[0].upper()
-            if distro in status_dict[pkg]['status']:
-                info = status_dict[pkg]['status'][distro]
-                if info['class'] == 'good':
-                    click.secho(letter, nl=False, bg='green')
-                else:
-                    click.secho(letter, nl=False, bg='red')
-            else:
-                click.secho(' ', nl=False)
-
-        click.secho('')
-
-        if args.statuses:
+        for pkg, status_dict in get_package_statuses(db):
+            click.secho(f_s.format(pkg), nl=False)
+            one = True
             for distro in distros:
-                if distro not in status_dict[pkg]:
-                    continue
-                d = status_dict[pkg][distro]['status']
-                click.secho(f'\t{distro:10} {d}', fg='cyan')
+                if one and distro not in ROS1:
+                    one = False
+                    click.secho(' ', nl=False)
+                letter = distro[0].upper()
+                if distro in status_dict['status']:
+                    info = status_dict['status'][distro]
+                    if info['class'] == 'good':
+                        click.secho(letter, nl=False, bg='green')
+                    else:
+                        click.secho(letter, nl=False, bg='red')
+                else:
+                    click.secho(' ', nl=False)
+
+            click.secho('')
+
+            if args.statuses:
+                for distro in distros:
+                    if distro not in status_dict:
+                        continue
+                    d = status_dict[distro]['status']
+                    click.secho(f'\t{distro:10} {d}', fg='cyan')
+
+            if args.write:
+                full_status[pkg] = status_dict
+
+    if args.write:
+        yaml.safe_dump(status_dict, open('status.yaml', 'w'))

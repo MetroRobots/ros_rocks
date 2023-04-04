@@ -4,6 +4,7 @@ import collections
 import datetime
 import dateutil.parser
 import itertools
+import os
 import re
 import requests
 from tqdm import tqdm
@@ -66,31 +67,28 @@ def get_repo(url):
             return {'url': m.group(1), 'name': m.group(2)}
 
 
-def merge_dicts(a, b, path=[]):
-    for k, v in b.items():
-        if k not in a:
-            a[k] = v
-        elif isinstance(v, dict):
-            merge_dicts(a[k], v, path + [k])
-        elif a[k] == v:
-            pass
-        else:
-            s = '/'.join(path)
-            click.secho(f'Conflicting values {a[k]} {v} {s}', fg='red')
+def get_modification_time(filepath):
+    file_stats = os.stat(filepath)
+    return int(file_stats.st_mtime)
 
 
-def get_distro_dicts(cache_folder, interactive=True):
+def read_distro_dicts(db, cache_folder, interactive=True):
     distro_paths = collections.defaultdict(dict)
     num_yamls = 0
     for path in cache_folder.glob('*yaml'):
         _, distro, name = path.stem.split('_')
+        key = f'{distro}_{name}'
+        mod_time = get_modification_time(path)
+        if mod_time == db.lookup('mod_time', 'updates', {'key': key}):
+            continue
         distro_paths[distro][name] = path
         num_yamls += 1
 
     if interactive:
         progress = tqdm(total=num_yamls)
 
-    pkg_dict = collections.defaultdict(dict)
+    build_types = {}
+
     for distro in sorted(distro_paths, key=distro_sorter):
         for name, path in distro_paths[distro].items():
             if interactive:
@@ -104,54 +102,59 @@ def get_distro_dicts(cache_folder, interactive=True):
                         if 'source' in arch_dict:
                             arch_dict[f'{name}_source'] = arch_dict.pop('source')
 
-                p_info = pkg_dict[pkg]
+                pkg_id = db.update('pkg', {'name': pkg}, 'name')
 
-                # Merge maintainers
-                if 'maintainers' not in p_info:
-                    p_info['maintainers'] = data['maintainers']
-                else:
-                    for maintainer in data['maintainers']:
-                        if maintainer not in p_info['maintainers']:
-                            p_info['maintainers'].append(maintainer)
+                for person in data['maintainers']:
+                    person_id = db.update('person', person, person)
+                    maintainer = {'pkg_id': pkg_id, 'person_id': person_id}
+                    db.update('maintainer', maintainer, maintainer)
 
                 repo = get_repo(data.get('url'))
                 if repo:
-                    if 'repo' not in p_info:
-                        p_info['repo'] = []
-                    if repo not in p_info['repo']:
-                        p_info['repo'].append(repo)
+                    repo_id = db.update('repo', repo, repo)
+                    pkg_repo = {'pkg_id': pkg_id, 'repo_id': repo_id}
+                    db.update('pkg_repo', pkg_repo, pkg_repo)
 
-                if 'build_status' not in p_info:
-                    p_info['build_status'] = {}
-                if distro not in p_info['build_status']:
-                    p_info['build_status'][distro] = {}
+                for os_name, os_info in data['build_status'].items():
+                    for os_code_name, code_info in os_info.items():
+                        for arch, arch_info in code_info.items():
+                            for release_build in ['build', 'main', 'test']:
+                                key = os_name, os_code_name, arch, release_build
+                                if key in build_types:
+                                    build_type_id = build_types[key]
+                                else:
+                                    build_type = {'os_name': os_name,
+                                                  'os_code_name': os_code_name,
+                                                  'arch': arch,
+                                                  'release': release_build}
+                                    build_type_id = db.update('build_type', build_type, build_type)
+                                    build_types[key] = build_type_id
 
-                merge_dicts(p_info['build_status'][distro], data['build_status'])
+                                status = {'pkg_id': pkg_id,
+                                          'distro': distro,
+                                          'build_type_id': build_type_id,
+                                          'binary_name': arch_info.get(release_build)}
+                                db.update('status', status, ['pkg_id', 'distro', 'build_type_id'])
 
+            db.update('updates', {'key': f'{distro}_{name}', 'mod_time': get_modification_time(path)}, 'key')
     if interactive:
         progress.close()
-    clean_dict = {}
-    for k, v in pkg_dict.items():
-        clean_dict[k] = dict(v)
-    return clean_dict
 
 
-def get_version_mapping(info):
+def get_version_mapping(db, pkg_id, distro):
     version_mapping = collections.defaultdict(list)
-    for os_name, os_info in info.items():
-        for os_code_name, code_info in os_info.items():
-            for arch, arch_info in code_info.items():
-                for release_build in ['build', 'main', 'test']:
-                    long_version = arch_info.get(release_build)
-                    if long_version:
-                        version = long_version.split('-')[0]
-                    else:
-                        version = long_version
-                    version_mapping[version].append({'os_name': os_name,
-                                                     'os_code_name': os_code_name,
-                                                     'arch': arch,
-                                                     'release_build': release_build,
-                                                     'is_source': 'source' if 'source' in arch else 'binary'})
+    for row in db.query(f'SELECT os_name, os_code_name, arch, release, binary_name '
+                        f'FROM status LEFT JOIN build_type ON build_type_id=id '
+                        f'WHERE pkg_id={pkg_id} AND distro="{distro}"'):
+        row = dict(row)
+        long_version = row.pop('binary_name')
+        if long_version:
+            version = long_version.split('-')[0]
+        else:
+            version = long_version
+        row['release_build'] = row.pop('release')
+        row['is_source'] = 'source' if 'source' in row['arch'] else 'binary'
+        version_mapping[version].append(row)
     return dict(version_mapping)
 
 
@@ -181,6 +184,19 @@ def can_split_versions_with_combo(pkg_status, combo):
     return version_mapping
 
 
+BTM = ['build', 'test', 'main']
+
+
+def split_sorter(split_name):
+    m = []
+    for part in split_name.split('/'):
+        if part in BTM:
+            m.append(BTM.index(part))
+        else:
+            m.append(part)
+    return tuple(m)
+
+
 def find_optimal_split(pkg_status):
     keys = ['release_build', 'is_source', 'os_name', 'os_code_name', 'arch']
     for num_keys in range(1, len(keys) + 1):
@@ -195,7 +211,7 @@ def find_optimal_split(pkg_status):
                 # Format for caching
                 ret_d = {}
                 for k, v in split_d.items():
-                    ret_d[k] = list(v)
+                    ret_d[k] = sorted(v, key=split_sorter)
                 return combo, ret_d
     return None, {}
 
@@ -207,7 +223,7 @@ def tuple_version(s):
     return tuple(map(int, pieces))
 
 
-def describe(split_combo, version_map, pkg):
+def describe(split_combo, version_map):
     if not version_map:
         return {'class': 'bad', 'status': 'completely missing', 'version': 'x.x.x'}
 
@@ -245,20 +261,31 @@ def describe(split_combo, version_map, pkg):
     return {'class': 'complicated', 'status': '\n'.join(old_vs), 'version': versions[-1]}
 
 
-def get_status(distro_dict):
-    status_dict = {}
-    for pkg, pkg_dict in distro_dict.items():
-        status_dict[pkg] = {'maintainers': pkg_dict['maintainers'], 'repo': pkg_dict['repo'], 'status': {}}
-        for distro, pkg_info in pkg_dict['build_status'].items():
-            version_mapping = get_version_mapping(pkg_info)
-            split_combo, versions = find_optimal_split(version_mapping)
-            status_dict[pkg]['status'][distro] = describe(split_combo, versions, pkg)
-    return status_dict
+def get_pkg_status(db, pkg_id):
+    status = {}
+    for distro in db.lookup_all('distro', 'status', {'pkg_id': pkg_id}, distinct=True):
+        version_mapping = get_version_mapping(db, pkg_id, distro)
+        split_combo, versions = find_optimal_split(version_mapping)
+        status[distro] = describe(split_combo, versions)
+    return status
 
 
-def get_all_distros(d):
-    distros = set()
-    for pkg_dict in d.values():
-        distros = distros.union(set(pkg_dict['status'].keys()))
+def get_package_statuses(db):
+    for pkg_entry in db.query('SELECT * FROM pkg ORDER BY name'):
+        pkg_id = pkg_entry['id']
+        pkg = pkg_entry['name']
+        status_dict = {'maintainers': [], 'repo': []}
 
-    return sorted(distros, key=distro_sorter)
+        for maintainer in db.query(f'SELECT name, email FROM '
+                                   f'maintainer LEFT JOIN person ON id=person_id WHERE pkg_id={pkg_id}'):
+            status_dict['maintainers'].append(dict(maintainer))
+        for repo in db.query(f'SELECT name, url FROM '
+                             f'pkg_repo LEFT JOIN repo ON id=repo_id WHERE pkg_id={pkg_id}'):
+            status_dict['repo'].append(dict(repo))
+
+        status_dict['status'] = get_pkg_status(db, pkg_id)
+        yield pkg, status_dict
+
+
+def get_all_distros(db):
+    return sorted(db.lookup_all('distro', 'status', distinct=True), key=distro_sorter)

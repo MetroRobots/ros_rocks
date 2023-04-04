@@ -1,11 +1,12 @@
 #!/usr/bin/python3
 import argparse
 import datetime
+from metro_db import MetroDB
 import pathlib
 import jinja2
 import yaml
 
-from ros_rocks import download_yamls, get_distro_dicts, get_status, ROS1, get_all_distros
+from ros_rocks import download_yamls, read_distro_dicts, get_package_statuses, ROS1, get_all_distros
 
 if __name__ == '__main__':
     current_folder = pathlib.Path(__file__).resolve().parent
@@ -17,22 +18,25 @@ if __name__ == '__main__':
     cache_folder = current_folder / 'the_yamls'
     cache_folder.mkdir(exist_ok=True)
 
-    cached_status = pathlib.Path('status.yaml')
-    if cached_status.exists() and args.quick:
-        D = yaml.safe_load(open('status.yaml'))
-    else:
-        download_yamls(cache_folder, debug=False)
-        distro_dicts = get_distro_dicts(cache_folder, interactive=False)
-        D = get_status(distro_dicts)
+    with MetroDB('build_status', folder=current_folder) as db:
+        cached_status = pathlib.Path('status.yaml')
+        if cached_status.exists() and args.quick:
+            D = yaml.safe_load(open('status.yaml')).items()
+        else:
+            download_yamls(cache_folder, debug=False)
+            read_distro_dicts(db, cache_folder)
+            D = get_package_statuses(db)
 
-    loader = jinja2.Environment(loader=jinja2.FileSystemLoader(current_folder))
-    template = loader.get_template('template.html')
-    stamp = datetime.datetime.now(datetime.timezone.utc)
+        loader = jinja2.Environment(loader=jinja2.FileSystemLoader(str(current_folder)))
+        template = loader.get_template('template.html')
+        stamp = datetime.datetime.now(datetime.timezone.utc)
 
-    for pkg in D:
-        D[pkg]['ros1'] = len([k for k in D[pkg]['status'] if k in ROS1])
-        D[pkg]['ros2'] = len([k for k in D[pkg]['status'] if k not in ROS1])
-    s = template.render(data=D, now=stamp.timestamp(), distros=get_all_distros(D))
+        def count_ros(D):
+            for name, info in D:
+                info['ros1'] = len([k for k in info['status'] if k in ROS1])
+                info['ros2'] = len([k for k in info['status'] if k not in ROS1])
+                yield name, info
+        s = template.render(data=count_ros(D), now=stamp.timestamp(), distros=get_all_distros(db))
 
-    with open(args.output_path, 'w') as f:
-        f.write(s)
+        with open(args.output_path, 'w') as f:
+            f.write(s)
