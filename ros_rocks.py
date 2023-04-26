@@ -48,6 +48,7 @@ def get_status_yamls():
 
 
 def download_yamls(cache_folder, debug=True):
+    cache_folder.mkdir(exist_ok=True)
     now = datetime.datetime.now()
     for filename, (full_url, dt) in get_status_yamls().items():
         target_path = cache_folder / filename
