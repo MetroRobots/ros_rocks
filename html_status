@@ -12,6 +12,7 @@ if __name__ == '__main__':
     current_folder = pathlib.Path(__file__).resolve().parent
     parser = argparse.ArgumentParser()
     parser.add_argument('output_path', type=pathlib.Path)
+    parser.add_argument('quick_path', type=pathlib.Path, nargs='?')
     parser.add_argument('-q', '--quick', action='store_true')
     args = parser.parse_args()
 
@@ -40,3 +41,9 @@ if __name__ == '__main__':
 
         with open(args.output_path, 'w') as f:
             f.write(s)
+
+        if args.quick_path:
+            s = template.render(data=count_ros(D), now=stamp.timestamp(),
+                                distros=['noetic', 'humble', 'iron', 'rolling'])
+            with open(args.quick_path, 'w') as f:
+                f.write(s)
