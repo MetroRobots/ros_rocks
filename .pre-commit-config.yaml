@@ -15,13 +15,13 @@ repos:
   - id: check-ast
   - id: double-quote-string-fixer
   - id: requirements-txt-fixer
-  rev: v5.0.0
+  rev: v6.0.0
 - repo: https://github.com/codespell-project/codespell
   hooks:
   - id: codespell
     args:
     - --write-changes
-  rev: v2.4.1
+  rev: v2.4.2
 - repo: https://github.com/hhatto/autopep8
   hooks:
   - id: autopep8
@@ -44,7 +44,7 @@ repos:
     - --format
     - parsable
     - --strict
-  rev: v1.37.1
+  rev: v1.38.0
 - repo: https://github.com/jumanjihouse/pre-commit-hook-yamlfmt
   hooks:
   - id: yamlfmt
